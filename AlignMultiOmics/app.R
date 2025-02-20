@@ -7,17 +7,11 @@ library(Matrix)
 library(zeallot)
 
 
+################################################################################
+sm.data <- readRDS("sm.RDS")
+st.data <- readRDS("st.RDS")
 
-sm.data <- readRDS("msi_annotated.RDS")
-st.data <- readRDS("vis.RDS")
-msi.pixel.multiplier = 20
-image.res = "lowres"
-continous_cols = NULL
-catagorical_cols = NULL
-fov = "fov"
-image.slice = "slice1"
-verbose = FALSE
-
+cat("loaded data")
 rotate <- function (
     angle,
     center.cur
@@ -272,15 +266,13 @@ generate.map.affine <- function (
 }
 
 
-#Get tissue coordinates from Seurat Objects
-
 ## ST cooridnates
-df <- GetTissueCoordinates(st.data)[c("x", "y")] * st.data@images[[image.slice]]@scale.factors[[image.res]]
+df <- st.data[c("x", "y")]
 
 ## SM Coordinates
-df2 <- GetTissueCoordinates(sm.data)[c("x", "y")]
-df2$x <- df2$x * msi.pixel.multiplier / (st.data@images[[image.slice]]@scale.factors[["hires"]]/st.data@images[[image.slice]]@scale.factors[[image.res]])
-df2$y <- df2$y * msi.pixel.multiplier / (st.data@images[[image.slice]]@scale.factors[["hires"]]/st.data@images[[image.slice]]@scale.factors[[image.res]])
+df2 <- sm.data[c("x", "y")]
+df2$x <- df2$x * 20 / (10/3)
+df2$y <- df2$y * 20 / (10/3)
 df2 <- df2[c("x", "y")]
 
 # Calculate scatter for plotting
@@ -298,141 +290,73 @@ sc2 <- df2[c("x", "y")]
 rownames(sc2) <- NULL
 coords2<- df2[c("pixel_x", "pixel_y")]
 
-sc <- list("1" = list("scatter" = sc1, "coords" = coords1),
-           "2" = list("scatter" = sc2, "coords" = coords2))
 
-
-arr <- st.data@images[[image.slice]]@image
-rotated_array <- aperm(arr, c(2, 1, 3))
-rotated_array <- rotated_array[ nrow(rotated_array):1, ,]
-color_matrix <- (as.raster(rotated_array))
-
-
-reference.index = 1
-align.index = 2
-scatters <- sc
-fixed.scatter <- scatters[[reference.index]]$scatter
 counter <- NULL
 coords.ls <- NULL
-transformations <-  list(diag(c(1, 1, 1)), diag(c(1, 1, 1)))
-tr.matrices <- lapply(transformations, function(x) diag(c(1, 1, 1)))
+scatters <- list("1" = list("scatter" = sc1, "coords" = coords1),
+                 "2" = list("scatter" = sc2, "coords" = coords2))
+rm(coords2)
+rm(sc2)
+rm(sc1)
+rm(coords1)
+rm(df2)
+rm(df)
 
-id <- list("1" = dim(color_matrix), "2" = dim(color_matrix))
-image.dims <- id
 
+tr.matrices <- lapply(list(diag(c(1, 1, 1)), diag(c(1, 1, 1))), function(x) diag(c(1, 1, 1)))
+
+image.dims <- list("1" = c(594,600), "2" = c(594,600))
+
+sm.data$x <- NULL
+sm.data$y <- NULL
+
+st.data$x <- NULL
+st.data$y <- NULL
+################################################################################
+
+
+cat("running")
 
 
 ui <- fluidPage(
   useShinyjs(),
   fluidRow(
-    column(4,
+    column(5,
            shiny::hr(),
            actionButton(inputId = "info", label = "Instructions"),
            shiny::hr(),
+           # Combine sliders for shifting and stretching in fewer rows
            fluidRow(
-             column(width = 6, sliderInput(
-               inputId = "angle",
-               label = "Rotation angle",
-               value = 0, min = -120, max = 120, step = 0.1
-             ))
+             column(6, sliderInput("angle", "Rotation angle", value = 0, min = -120, max = 120, step = 0.1)),
+             column(6, sliderInput("shift_x", "Move along x axis", value = 0, min = -450, max = 450, step = 1)),
+             column(6, sliderInput("shift_y", "Move along y axis", value = 0, min = -450, max = 450, step = 1)),
+             column(6, sliderInput("stretch_angle1", "Stretch angle 1", value = 0, min = -180, max = 180, step = 0.1)),
+             column(6, sliderInput("stretch_factor1", "Stretch factor 1", value = 1, min = 0.1, max = 2, step = 0.01)),
+             column(6, sliderInput("stretch_angle2", "Stretch angle 2", value = 0, min = -180, max = 180, step = 0.1)),
+             column(6, sliderInput("stretch_factor2", "Stretch factor 2", value = 1, min = 0.1, max = 2, step = 0.01))
            ),
+           # Group numeric inputs
            fluidRow(
-             column(width = 6, sliderInput(
-               inputId = "shift_x",
-               label = "Move along x axis",
-               value = 0, min = -round(dim(color_matrix)[2]*(3/4)), max = round(dim(color_matrix)[2]*(3/4)), step = 1
-             )),
-             column(width = 6, sliderInput(
-               inputId = "shift_y",
-               label = "Move along y axis",
-               value = 0, min = -round(dim(color_matrix)[2]*(3/4)), max = round(dim(color_matrix)[2]*(3/4)), step = 1
-             ))
+             column(4, numericInput("size_spot", "SM spot size", value = 0.5, min = 0, max = 5, step = 0.1)),
+             column(4, numericInput("size_target", "ST point size", value = 0.3, min = 0, max = 5, step = 0.05)),
+             column(4, selectInput("spot_shape", "Spot shape", choices = c("circle", "square")))
            ),
-           h4("stretch along blue axis:"),
+           # Group feature selectors for better layout
            fluidRow(
-             column(width = 6, sliderInput(
-               inputId = "stretch_angle1",
-               label = "angle",
-               value = 0, min = -180, max = 180, step = 0.1
-             )),
-             column(width = 6, sliderInput(
-               inputId = "stretch_factor1",
-               label = "stretch/squeeze",
-               value = 1, min = 0.1, max = 2, step = 0.01
-             ))
+             column(4, selectInput("sm_plot", "SM plot feature", choices = colnames(sm.data))),
+             column(4, selectInput("st_plot", "ST plot feature", choices = colnames(st.data)))
            ),
-           h4("stretch along red axis:"),
+           # Group checkboxes together
            fluidRow(
-             column(width = 6, sliderInput(
-               inputId = "stretch_angle2",
-               label = "angle",
-               value = 0, min = -180, max = 180, step = 0.1
-             )),
-             column(width = 6, sliderInput(
-               inputId = "stretch_factor2",
-               label = "stretch/squeeze",
-               value = 1, min = 0.1, max = 2, step = 0.01
-             ))
+             column(4, checkboxInput("show_ST_img", "Show image", value = TRUE)),
+             column(4, checkboxInput("show_ST_spots", "Show ST spots", value = FALSE)),
+             column(4, checkboxInput("show_SM_spots", "Show SM spots", value = TRUE)),
+             column(4, checkboxInput("flip_x", "Mirror along x axis", value = FALSE)),
+             column(4, checkboxInput("flip_y", "Mirror along y axis", value = FALSE))
            ),
-           fluidRow(
-             column(4, numericInput(
-               inputId = "size_spot",
-               label = "SM spot size",
-               value = 0.5, min = 0, max = 5, step = 0.1
-             )),
-             column(4, numericInput(
-               inputId = "size_target",
-               label = "ST point size",
-               value = 0.3, min = 0, max = 5, step = 0.05
-             )),
-             column(4, selectInput(
-               inputId = "spot_shape",
-               label = "spot shape",
-               choices =   c("spot" = "circle",
-                             "pixel" = "square")
-             )),
-             column(4, selectInput(
-               inputId = "sm_plot",
-               label = "SM plot feature",
-               choices =   setNames(colnames(sm.data@meta.data), colnames(sm.data@meta.data))
-             )),
-             column(4, selectInput(
-               inputId = "st_plot",
-               label = "ST plot feature",
-               choices =   setNames(colnames(st.data@meta.data), colnames(st.data@meta.data))
-             ))
-           ),
-           fluidRow(
-
-             column(4,  checkboxInput(inputId = "show_ST_img",
-                                      label = "show image",
-                                      value = TRUE)
-             ),column(4,  checkboxInput(inputId = "show_ST_spots",
-                                        label = "show ST spots",
-                                        value = FALSE)
-             ),
-             column(4,  checkboxInput(inputId = "show_SM_spots",
-                                      label = "show SM spots",
-                                      value = TRUE)
-             ),
-             column(4,  checkboxInput(inputId = "flip_x",
-                                      label = "mirror along x axis",
-                                      value = FALSE)
-             ),
-             column(4,  checkboxInput(inputId = "flip_y",
-                                      label = "mirror along y axis",
-                                      value = FALSE)
-             )
-
-           ),
-           #selectInput(inputId = "sample", choices = (1:length(scatters))[-reference.index],
-
-           #             label = "Select sample", selected = reference.index),
            actionButton("myBtn", "Return aligned data")
     ),
-
-    column(7, plotOutput("scatter")
-    )
+    column(7, plotOutput("scatter", width = "100%", height = "100%"))
   )
 )
 
@@ -550,7 +474,7 @@ server <- function(input, output) {
     scatter.t <- t(tr%*%rbind(t(scatter.t), 1))[, 1:2]
     coords.t <- t(tr%*%rbind(t(coords.t), 1))[, 1:2]
 
-    return(list(scatter = scatter.t, coords = coords.t, tr = tr, xylimits = image.dims[[align.index]]))
+    return(list(scatter = scatter.t, coords = coords.t, tr = tr, xylimits = image.dims[[2]]))
   })
 
   output$scatter <- renderPlot({
@@ -575,42 +499,35 @@ server <- function(input, output) {
     }
 
 
-    if (!is.null(continous_cols)){
-      cont_pal <- continous_cols
+
+    cont_pal  <- RColorBrewer::brewer.pal("Reds", n = 9)
+    cat_pal <- c("black", RColorBrewer::brewer.pal("Paired", n = 10))
+
+
+
+    if (is.numeric(sm.data[[sm_feature_plot()]])){
+      sm_cols <- cont_pal[as.numeric(cut(sm.data[[sm_feature_plot()]],breaks = 9))]
     } else {
-      cont_pal  <- RColorBrewer::brewer.pal("Reds", n = 9)
+      sm_cols <- cat_pal[as.factor(sm.data[[sm_feature_plot()]])]
     }
 
-    if (!is.null(catagorical_cols)){
-      cat_pal <- catagorical_cols
+    if (is.numeric(st.data[[st_feature_plot()]])){
+      st_cols <- cont_pal[as.numeric(cut(st.data[[st_feature_plot()]],breaks = 9))]
     } else {
-      cat_pal <- c("black", RColorBrewer::brewer.pal("Paired", n = 10))
-    }
-
-
-    if (is.numeric(sm.data@meta.data[[sm_feature_plot()]])){
-      sm_cols <- cont_pal[as.numeric(cut(sm.data@meta.data[[sm_feature_plot()]],breaks = 9))]
-    } else {
-      sm_cols <- cat_pal[as.factor(sm.data@meta.data[[sm_feature_plot()]])]
-    }
-
-    if (is.numeric(st.data@meta.data[[st_feature_plot()]])){
-      st_cols <- cont_pal[as.numeric(cut(st.data@meta.data[[st_feature_plot()]],breaks = 9))]
-    } else {
-      st_cols <- cat_pal[as.factor(st.data@meta.data[[st_feature_plot()]])]
+      st_cols <- cat_pal[as.factor(st.data[[st_feature_plot()]])]
     }
 
 
     if (pt_st_img()){
-      plot(color_matrix)
+      plot(readRDS("img.RDS"))
+      #plot(NULL, NULL, col = "white", xlim = c(0, 594), ylim = c(0, 600), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
     } else{
 
-      plot(NULL, NULL, col = "white", xlim = c(0, dim(color_matrix)[1]), ylim = c(0, dim(color_matrix)[2]), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
       #plot(fixed.scatter[, 1], fixed.scatter[, 2], col = st_cols, pch = as.numeric(pt_shape()), cex = pt_size_target(), xlim = c(0, dim(color_matrix)[1]), ylim = c(0, dim(color_matrix)[2]), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
     }
 
     if (pt_st_points()){
-      points(fixed.scatter[, 1], fixed.scatter[, 2], col = st_cols, pch = as.numeric(pt_shape()), cex = pt_size_target())
+      points(scatters[[1]]$scatter[, 1], scatters[[1]]$scatter[, 2], col = st_cols, pch = as.numeric(pt_shape()), cex = pt_size_target())
     }
 
     if (pt_sm_points()){
@@ -619,9 +536,9 @@ server <- function(input, output) {
       arrows.1(x0 = center[1], y0 = center[2], angle.ar = 90 + stretch_angle2(), length.ar = 100*stretch_factor2(), lwd = 4, col = "red")
     }
 
-  }, height = 800, width = 800)
+  }, height = 500, width = 500)
 
-  scatter.coords <- eventReactive(align.index, {
+  scatter.coords <- eventReactive(2, {
     reset("angle"); reset("shift_x"); reset("shift_y"); reset("flip_x"); reset("flip_y"); reset("stretch_factor1"); reset("stretch_factor2"); reset("stretch_angle1"); reset("stretch_angle2")
     if (!is.null(counter)) {
       scatters[[counter]] <<- coords.ls[c(1, 2)]
@@ -631,9 +548,9 @@ server <- function(input, output) {
         tr.matrices[[counter]] <<- coords.ls[[3]]
       }
     }
-    scatter <- scatters[[as.numeric(align.index)]]$scatter
-    coords <- scatters[[as.numeric(align.index)]]$coords
-    counter <<- as.numeric(align.index)
+    scatter <- scatters[[as.numeric(2)]]$scatter
+    coords <- scatters[[as.numeric(2)]]$coords
+    counter <<- as.numeric(2)
     return(list(scatter, coords))
   })
 
@@ -676,6 +593,6 @@ server <- function(input, output) {
 }
 
 # Returned transformation matrices
-runApp(list(ui = ui, server = server))
+shinyApp(ui, server)
 
 
