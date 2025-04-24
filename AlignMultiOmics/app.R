@@ -520,10 +520,10 @@ server <- function(input, output) {
 
     if (pt_st_img()){
       plot(readRDS("img.RDS"))
-      #plot(NULL, NULL, col = "white", xlim = c(0, 594), ylim = c(0, 600), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
+
     } else{
 
-      #plot(fixed.scatter[, 1], fixed.scatter[, 2], col = st_cols, pch = as.numeric(pt_shape()), cex = pt_size_target(), xlim = c(0, dim(color_matrix)[1]), ylim = c(0, dim(color_matrix)[2]), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
+      plot(NULL, NULL, col = "white", xlim = c(0, 594), ylim = c(0, 600), xaxt = 'n', yaxt = 'n', ann = FALSE, bty = "n")
     }
 
     if (pt_st_points()){
