@@ -58,7 +58,17 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       numericInput("curve_center", "m/z Value:", value = 450, min = min(df$means), max = max(df$means), step = 1),
-      sliderInput("curve_width", "Bin Width (m/z):", min = 0, max = 100, value = 10, step = 0.1),
+      radioButtons("bin_mode", "Binning Mode:",
+                   choices = c("Absolute (m/z)" = "mz", "Relative (ppm)" = "ppm"),
+                   selected = "mz"),
+      fluidRow(
+        column(6,
+               sliderInput("curve_width_slider", "Bin Width:", min = 0, max = 100, value = 10, step = 0.1)
+        ),
+        column(6,
+               numericInput("curve_width","", value = 10, min = 0, max = 1000)
+        )
+      ),
       numericInput("spot_size", "Plot Spot Size:", value = 10, min = 0, max = 100),  # Added spot size input
 
       fluidRow(
@@ -75,9 +85,31 @@ ui <- fluidPage(
 )
 
 server <- function(input, output, session) {
+
+  observeEvent(input$curve_width_slider, {
+    updateNumericInput(session, "curve_width", value = input$curve_width_slider)
+  })
+
+  # Keep slider in sync with numeric input
+  observeEvent(input$curve_width, {
+    updateSliderInput(session, "curve_width_slider", value = input$curve_width)
+  })
+
+
   output$plot <- renderPlotly({
     curve_center <- input$curve_center
-    curve_width <- input$curve_width
+    bin_mode <- input$bin_mode
+
+    if (bin_mode == "ppm") {
+      tolerance <- input$curve_width * 1e-6
+      lower_bound <- curve_center - (curve_center * tolerance)
+      upper_bound <- curve_center + (curve_center * tolerance)
+      curve_width <- (upper_bound - lower_bound) / 2
+    } else {
+      curve_width <- input$curve_width
+    }
+
+
     x_min <- input$x_min
     x_max <- input$x_max
 
@@ -107,14 +139,21 @@ server <- function(input, output, session) {
   selected_points <- reactive({
     curve_center <- input$curve_center
     curve_width <- input$curve_width
+    bin_mode <- input$bin_mode
 
-    # Generate new x-values for the curve
-    new_x_vals <- seq(from = curve_center - curve_width, to = curve_center + curve_width, length.out = 100)
+    if (bin_mode == "ppm") {
+      tolerance <- curve_width * 1e-6
+      lower_bound <- curve_center - (curve_center * tolerance)
+      upper_bound <- curve_center + (curve_center * tolerance)
+      curve_width <- (upper_bound - lower_bound) / 2
+    } else {
+      lower_bound <- curve_center - curve_width
+      upper_bound <- curve_center + curve_width
+    }
 
-    # Select y-values within the curve range
-    selected_point <- df$x[df$x >= min(new_x_vals) & df$x <= max(new_x_vals)]
-
+    df$x[df$x >= lower_bound & df$x <= upper_bound]
   })
+
   output$selected_indices <- renderText({
     indices <- selected_points()
 
@@ -130,9 +169,21 @@ server <- function(input, output, session) {
     spot_size <- input$spot_size
 
     if (length(indices) > 0) {
+
+      curve_center <- input$curve_center
+      curve_width <- input$curve_width
+      bin_mode <- input$bin_mode
+
+      if (bin_mode == "ppm") {
+        tolerance <- curve_width * 1e-6
+        lower_bound <- curve_center - (curve_center * tolerance)
+        upper_bound <- curve_center + (curve_center * tolerance)
+        curve_width <- (upper_bound - lower_bound) / 2
+      }
+
       features_to_plot <- indices  # Example gene names based on index
       features_to_plot <- paste0("mz-",features_to_plot)
-      feature_name <- sprintf("mz-%d \u00B1 %.1f", input$curve_center, input$curve_width)
+      feature_name <- sprintf("mz-%d \u00B1 %.1f", curve_center, curve_width)
       binned_obj <- binmetabolites(obj, mzs = features_to_plot, assay = "Spatial", slot = "counts", bin_name = feature_name)
       Seurat::SpatialFeaturePlot(binned_obj, images = image, features = feature_name,  pt.size.factor = spot_size) &theme_void()
     } else {
